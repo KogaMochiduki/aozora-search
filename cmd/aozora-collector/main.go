@@ -1,7 +1,10 @@
 package main
 
 import (
+	"archive/zip"
+	"bytes"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"net/url"
@@ -10,6 +13,8 @@ import (
 	"strings"
 
 	"github.com/PuerkitoBio/goquery"
+	"golang.org/x/text/encoding/japanese"
+	"golang.org/x/text/transform"
 )
 
 type Entry struct {
@@ -95,6 +100,47 @@ func findEntries(siteURL string) ([]Entry, error) {
 	return entries, nil
 }
 
+func extractText(zipURL string) (string, error) {
+	res, err := http.Get(zipURL)
+	if err != nil {
+		return "", err
+	}
+	defer res.Body.Close()
+	b, err := io.ReadAll(res.Body)
+	if err != nil {
+		return "", err
+	}
+
+	r, err := zip.NewReader(bytes.NewReader(b), int64(len(b)))
+	if err != nil {
+		return "", err
+	}
+
+	for _, file := range r.File {
+		if path.Ext(file.Name) == ".txt" {
+			f, err := file.Open()
+			if err != nil {
+				return "", err
+			}
+			b, err := io.ReadAll(f)
+			f.Close()
+			if err != nil {
+				return "", err
+			}
+
+			transformer := japanese.ShiftJIS.NewDecoder()
+			utf8Data, _, err := transform.Bytes(transformer, b)
+			if err != nil {
+				return "", err
+			}
+
+			return string(utf8Data), nil
+		}
+	}
+
+	return zipURL, err
+}
+
 func main() {
 	listURL := "https://www.aozora.gr.jp/index_pages/person879.html"
 
@@ -103,6 +149,12 @@ func main() {
 		log.Fatal(err)
 	}
 	for _, entry := range entries {
-		fmt.Println(entry.Title, entry.ZipURL)
+		content, err := extractText(entry.ZipURL)
+		if err != nil {
+			log.Println(err)
+			continue
+		}
+		fmt.Println(entry.SiteURL)
+		fmt.Println(content)
 	}
 }
